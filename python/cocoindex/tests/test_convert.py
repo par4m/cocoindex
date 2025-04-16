@@ -30,12 +30,12 @@ def test_to_engine_value_uuid():
     u = uuid.uuid4()
     assert to_engine_value(u) == u.bytes
 
-def test_to_engine_value_date_time():
+def test_to_engine_value_date_time_types():
     d = datetime.date(2024, 1, 1)
-    t = datetime.time(12, 30)
-    dt = datetime.datetime(2024, 1, 1, 12, 30)
     assert to_engine_value(d) == d
+    t = datetime.time(12, 30)
     assert to_engine_value(t) == t
+    dt = datetime.datetime(2024, 1, 1, 12, 30)
     assert to_engine_value(dt) == dt
 
 def test_to_engine_value_struct():
@@ -57,6 +57,13 @@ def test_to_engine_value_nested_struct():
 def test_to_engine_value_empty_list():
     assert to_engine_value([]) == []
     assert to_engine_value([[]]) == [[]]
+
+def test_to_engine_value_tuple():
+    assert to_engine_value(()) == []
+    assert to_engine_value((1, 2, 3)) == [1, 2, 3]
+    assert to_engine_value(((1, 2), (3, 4))) == [[1, 2], [3, 4]]
+    assert to_engine_value(([],)) == [[]]
+    assert to_engine_value(((),)) == [[]]
 
 def test_to_engine_value_none():
     assert to_engine_value(None) is None
