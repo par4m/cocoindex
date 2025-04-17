@@ -267,6 +267,7 @@ pub struct ResourceSetupInfo<K, S, C: ResourceSetupStatusCheck> {
 
 impl<K, S, C: ResourceSetupStatusCheck> std::fmt::Display for ResourceSetupInfo<K, S, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let cyan = (0x5c, 0xe1, 0xe6);
         let status_code = match self.status_check.as_ref().map(|c| c.change_type()) {
             Some(SetupChangeType::NoChange) => "READY",
             Some(SetupChangeType::Create) => "TO CREATE",
@@ -275,11 +276,10 @@ impl<K, S, C: ResourceSetupStatusCheck> std::fmt::Display for ResourceSetupInfo<
             Some(SetupChangeType::Invalid) => "INVALID",
             None => "USER MANAGED",
         };
-        // Colors
-        let status_bg = status_code.on_truecolor(0x5c, 0xe1, 0xe6);
-        let status_colored = status_bg.truecolor(0xff, 0xff, 0xff);
+        let status_str = format!("[ {:^9} ]", status_code);
+        let status_full = status_str.truecolor(cyan.0, cyan.1, cyan.2);
         let desc_colored = self.description.truecolor(0xff, 0xff, 0xff);
-        writeln!(f, "[ {:^9} ] {}", status_colored, desc_colored)?;
+        writeln!(f, "{} {}", status_full, desc_colored)?;
         if let Some(status_check) = &self.status_check {
             let changes = status_check.describe_changes();
             if !changes.is_empty() {
