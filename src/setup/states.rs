@@ -14,6 +14,7 @@
 use crate::prelude::*;
 
 use indenter::indented;
+use owo_colors::OwoColorize;
 use std::fmt::Debug;
 use std::fmt::{Display, Write};
 use std::hash::Hash;
@@ -274,14 +275,18 @@ impl<K, S, C: ResourceSetupStatusCheck> std::fmt::Display for ResourceSetupInfo<
             Some(SetupChangeType::Invalid) => "INVALID",
             None => "USER MANAGED",
         };
-        writeln!(f, "[ {:^9} ] {}", status_code, self.description)?;
+        // Colors
+        let status_bg = status_code.on_truecolor(0x5c, 0xe1, 0xe6);
+        let status_colored = status_bg.truecolor(0xff, 0xff, 0xff);
+        let desc_colored = self.description.truecolor(0xff, 0xff, 0xff);
+        writeln!(f, "[ {:^9} ] {}", status_colored, desc_colored)?;
         if let Some(status_check) = &self.status_check {
             let changes = status_check.describe_changes();
             if !changes.is_empty() {
                 let mut f = indented(f).with_str(INDENT);
-                writeln!(f, "TODO:")?;
+                writeln!(f, "{}", "TODO:".truecolor(0xae, 0xae, 0xae))?;
                 for change in changes {
-                    writeln!(f, "  - {}", change)?;
+                    writeln!(f, "  - {}", change.truecolor(0xae, 0xae, 0xae))?;
                 }
                 writeln!(f)?;
             }
