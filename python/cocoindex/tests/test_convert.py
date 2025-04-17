@@ -33,6 +33,14 @@ class NestedStruct:
     orders: list[Order]
     count: int = 0
 
+def build_converter(py_type, target_type=None):
+    """
+    Helper to build a converter for the given Python type.
+    If target_type is not specified, uses py_type as the target.
+    """
+    engine_type = encode_enriched_type(py_type)["type"]
+    return make_engine_value_converter([], engine_type, target_type or py_type)
+
 def test_to_engine_value_basic_types():
     assert to_engine_value(123) == 123
     assert to_engine_value(3.14) == 3.14
@@ -89,13 +97,11 @@ def test_make_engine_value_converter_basic_types():
         (bool, True),
         # (type(None), None),  # Removed unsupported NoneType
     ]:
-        engine_type = encode_enriched_type(py_type)["type"]
-        converter = make_engine_value_converter([], engine_type, py_type)
+        converter = build_converter(py_type)
         assert converter(value) == value
 
 def test_make_engine_value_converter_struct():
-    engine_type = encode_enriched_type(Order)["type"]
-    converter = make_engine_value_converter([], engine_type, Order)
+    converter = build_converter(Order)
     # All fields match
     engine_val = ["O123", "mixed nuts", 25.0, "default_extra"]
     assert converter(engine_val) == Order("O123", "mixed nuts", 25.0, "default_extra")
@@ -115,29 +121,25 @@ def test_make_engine_value_converter_struct():
 def test_make_engine_value_converter_struct_field_order():
     # Engine fields in different order
     # Use encode_enriched_type to avoid manual mistakes
-    engine_type = encode_enriched_type(Order)["type"]
-    converter = make_engine_value_converter([], engine_type, Order)
+    converter = build_converter(Order)
     # Provide all fields in the correct order
     engine_val = ["O123", "mixed nuts", 25.0, "default_extra"]
     assert converter(engine_val) == Order("O123", "mixed nuts", 25.0, "default_extra")
 
 def test_make_engine_value_converter_collections():
     # List of structs
-    engine_type = encode_enriched_type(list[Order])["type"]
-    converter = make_engine_value_converter([], engine_type, list[Order])
+    converter = build_converter(list[Order])
     engine_val = [
         ["O1", "item1", 10.0, "default_extra"],
         ["O2", "item2", 20.0, "default_extra"]
     ]
     assert converter(engine_val) == [Order("O1", "item1", 10.0, "default_extra"), Order("O2", "item2", 20.0, "default_extra")]
     # Struct with list field
-    engine_type = encode_enriched_type(Customer)["type"]
-    converter = make_engine_value_converter([], engine_type, Customer)
+    converter = build_converter(Customer)
     engine_val = ["Alice", ["O1", "item1", 10.0, "default_extra"], [["vip"], ["premium"]]]
     assert converter(engine_val) == Customer("Alice", Order("O1", "item1", 10.0, "default_extra"), [Tag("vip"), Tag("premium")])
     # Struct with struct field
-    engine_type = encode_enriched_type(NestedStruct)["type"]
-    converter = make_engine_value_converter([], engine_type, NestedStruct)
+    converter = build_converter(NestedStruct)
     engine_val = [
         ["Alice", ["O1", "item1", 10.0, "default_extra"], [["vip"]]],
         [["O1", "item1", 10.0, "default_extra"], ["O2", "item2", 20.0, "default_extra"]],
@@ -151,8 +153,7 @@ def test_make_engine_value_converter_collections():
 
 def test_make_engine_value_converter_defaults_and_missing_fields():
     # Missing optional field in engine value
-    engine_type = encode_enriched_type(Customer)["type"]
-    converter = make_engine_value_converter([], engine_type, Customer)
+    converter = build_converter(Customer)
     engine_val = ["Alice", ["O1", "item1", 10.0, "default_extra"], None]  # tags explicitly None
     assert converter(engine_val) == Customer("Alice", Order("O1", "item1", 10.0, "default_extra"), None)
     # Extra field in engine value (should ignore)
