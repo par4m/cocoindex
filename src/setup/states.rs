@@ -283,7 +283,7 @@ impl<K, S, C: ResourceSetupStatusCheck> std::fmt::Display for ResourceSetupInfo<
             let changes = status_check.describe_changes();
             if !changes.is_empty() {
                 let mut f = indented(f).with_str(INDENT);
-                writeln!(f, "{}", "CHANGE:".color(AnsiColors::BrightBlack))?;
+                writeln!(f, "{}", "TODO:".color(AnsiColors::BrightBlack))?;
                 for change in changes {
                     writeln!(f, "  - {}", change.color(AnsiColors::BrightBlack))?;
                 }
