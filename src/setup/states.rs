@@ -389,7 +389,12 @@ impl std::fmt::Display for FormattedFlowSetupStatusCheck<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let flow_ssc = self.1;
 
-        write!(f, "{} Flow: {}\n", ObjectSetupStatusCode(flow_ssc), self.0)?;
+        write!(
+            f,
+            "{} {}\n",
+            ObjectSetupStatusCode(flow_ssc).to_string().color(AnsiColors::Cyan),
+            format!("Flow: {}", self.0).color(AnsiColors::White)
+        )?;
 
         let mut f = indented(f).with_str(INDENT);
         write!(f, "{}", flow_ssc.tracking_table)?;
