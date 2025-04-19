@@ -1,7 +1,7 @@
 import dataclasses
 import uuid
 import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, make_dataclass
 import pytest
 from cocoindex.typing import encode_enriched_type
 from cocoindex.convert import to_engine_value
@@ -217,3 +217,65 @@ def test_engine_python_schema_missing_field():
     converter = build_engine_value_converter(EngineOrder, PythonOrder)
     engine_val = ["O123", "mixed nuts", 25.0]
     assert converter(engine_val) == PythonOrder("O123", "mixed nuts")
+
+
+
+def make_engine_order(fields):
+    return make_dataclass('EngineOrder', fields)
+
+def make_python_order(fields, defaults=None):
+    if defaults is None:
+        defaults = {}
+    # Move all fields with defaults to the end (Python dataclass requirement)
+    non_default_fields = [(n, t) for n, t in fields if n not in defaults]
+    default_fields = [(n, t) for n, t in fields if n in defaults]
+    ordered_fields = non_default_fields + default_fields
+    # Prepare the namespace for defaults (only for fields at the end)
+    namespace = {k: defaults[k] for k, _ in default_fields}
+    return make_dataclass('PythonOrder', ordered_fields, namespace=namespace)
+
+@pytest.mark.parametrize(
+    "engine_fields, python_fields, python_defaults, engine_val, expected_python_val",
+    [
+        # Extra field in Python (middle)
+        (
+            [("id", str), ("name", str)],
+            [("id", str), ("price", float), ("name", str)],
+            {"price": 0.0},
+            ["O123", "mixed nuts"],
+            ("O123", 0.0, "mixed nuts"),
+        ),
+        # Missing field in Python (middle)
+        (
+            [("id", str), ("price", float), ("name", str)],
+            [("id", str), ("name", str)],
+            {},
+            ["O123", 25.0, "mixed nuts"],
+            ("O123", "mixed nuts"),
+        ),
+        # Extra field in Python (start)
+        (
+            [("name", str), ("price", float)],
+            [("extra", str), ("name", str), ("price", float)],
+            {"extra": "default"},
+            ["mixed nuts", 25.0],
+            ("default", "mixed nuts", 25.0),
+        ),
+        # Missing field in Python (start)
+        (
+            [("extra", str), ("name", str), ("price", float)],
+            [("name", str), ("price", float)],
+            {},
+            ["unexpected", "mixed nuts", 25.0],
+            ("mixed nuts", 25.0),
+        ),
+    ]
+)
+def test_field_position_cases(engine_fields, python_fields, python_defaults, engine_val, expected_python_val):
+    EngineOrder = make_engine_order(engine_fields)
+    PythonOrder = make_python_order(python_fields, python_defaults)
+    converter = build_engine_value_converter(EngineOrder, PythonOrder)
+    # Map field names to expected values
+    expected_dict = dict(zip([f[0] for f in python_fields], expected_python_val))
+    # Instantiate using keyword arguments (order doesn't matter)
+    assert converter(engine_val) == PythonOrder(**expected_dict)
