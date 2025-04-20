@@ -3,7 +3,7 @@ use crate::llm::{LlmGenerationClient, LlmSpec, LlmGenerateRequest, LlmGenerateRe
 use anyhow::{Result, anyhow};
 use serde_json;
 use reqwest::Client as HttpClient;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 pub struct Client {
     model: String,
@@ -45,7 +45,7 @@ impl LlmGenerationClient for Client {
         request: LlmGenerateRequest<'req>,
     ) -> Result<LlmGenerateResponse> {
         // Compose the prompt/messages
-        let mut contents = vec![serde_json::json!({
+        let contents = vec![serde_json::json!({
             "role": "user",
             "parts": [{ "text": request.user_prompt }]
         })];
@@ -89,10 +89,6 @@ impl LlmGenerationClient for Client {
             .map_err(|e| anyhow!("HTTP error: {e}"))?;
 
         let resp_json: Value = resp.json().await.map_err(|e| anyhow!("Invalid JSON: {e}"))?;
-
-        // Debug log Gemini response
-        println!("Gemini request payload: {:#}", payload);
-        println!("Gemini response JSON: {:#}", resp_json);
 
         if let Some(error) = resp_json.get("error") {
             return Err(anyhow!("Gemini API error: {:?}", error));
