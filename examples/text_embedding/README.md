@@ -1,7 +1,5 @@
 Simple example for cocoindex: build embedding index based on local files.
 
-## Quickstart
-
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1e2KgjVUQp8u-0Va28C3WjfVnSjrjobQA?usp=sharing)
 
 ## Prerequisite
