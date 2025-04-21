@@ -1,21 +1,26 @@
 use async_trait::async_trait;
 use crate::llm::{LlmGenerationClient, LlmSpec, LlmGenerateRequest, LlmGenerateResponse, ToJsonSchemaOptions, OutputFormat};
-use anyhow::{Result, anyhow};
-use serde_json;
-use reqwest::Client as HttpClient;
+use anyhow::{Result, bail};
 use serde_json::Value;
+use crate::api_bail;
+use urlencoding::encode;
 
 pub struct Client {
     model: String,
+    api_key: String,
+    client: reqwest::Client,
 }
 
 impl Client {
     pub async fn new(spec: LlmSpec) -> Result<Self> {
-        if std::env::var("GEMINI_API_KEY").is_err() {
-            anyhow::bail!("GEMINI_API_KEY environment variable must be set");
-        }
+        let api_key = match std::env::var("GEMINI_API_KEY") {
+            Ok(val) => val,
+            Err(_) => api_bail!("GEMINI_API_KEY environment variable must be set"),
+        };
         Ok(Self {
             model: spec.model,
+            api_key,
+            client: reqwest::Client::new(),
         })
     }
 }
@@ -51,12 +56,11 @@ impl LlmGenerationClient for Client {
         })];
 
         // Optionally add system prompt
-        let mut system_instruction = None;
-        if let Some(system) = request.system_prompt {
-            system_instruction = Some(serde_json::json!({
-                "parts": [{ "text": system }]
-            }));
-        }
+        let system_instruction = request.system_prompt.map(|system|
+            serde_json::json!({
+                "parts": [ { "text": system } ]
+            })
+        );
 
         // Prepare payload
         let mut payload = serde_json::json!({ "contents": contents });
@@ -74,29 +78,33 @@ impl LlmGenerationClient for Client {
             });
         }
 
-        let api_key = std::env::var("GEMINI_API_KEY")
-            .map_err(|_| anyhow!("GEMINI_API_KEY environment variable must be set"))?;
+        let api_key = &self.api_key;
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            self.model, api_key
+            encode(&self.model), encode(api_key)
         );
 
-        let client = HttpClient::new();
-        let resp = client.post(&url)
+        let resp = match self.client.post(&url)
             .json(&payload)
             .send()
-            .await
-            .map_err(|e| anyhow!("HTTP error: {e}"))?;
+            .await {
+            Ok(resp) => resp,
+            Err(e) => api_bail!("HTTP error: {e}"),
+        };
 
-        let resp_json: Value = resp.json().await.map_err(|e| anyhow!("Invalid JSON: {e}"))?;
+        let resp_json: Value = match resp.json().await {
+            Ok(json) => json,
+            Err(e) => api_bail!("Invalid JSON: {e}"),
+        };
 
         if let Some(error) = resp_json.get("error") {
-            return Err(anyhow!("Gemini API error: {:?}", error));
+            bail!("Gemini API error: {:?}", error);
         }
-        let text = resp_json["candidates"][0]["content"]["parts"][0]["text"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let mut resp_json = resp_json;
+        let text = match &mut resp_json["candidates"][0]["content"]["parts"][0]["text"] {
+            Value::String(s) => std::mem::take(s),
+            _ => bail!("No text in response"),
+        };
 
         Ok(LlmGenerateResponse { text })
     }
