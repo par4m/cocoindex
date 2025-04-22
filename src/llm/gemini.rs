@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use crate::llm::{LlmGenerationClient, LlmSpec, LlmGenerateRequest, LlmGenerateResponse, ToJsonSchemaOptions, OutputFormat};
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, Context};
 use serde_json::Value;
 use crate::api_bail;
 use urlencoding::encode;
@@ -55,17 +55,12 @@ impl LlmGenerationClient for Client {
             "parts": [{ "text": request.user_prompt }]
         })];
 
-        // Optionally add system prompt
-        let system_instruction = request.system_prompt.map(|system|
-            serde_json::json!({
-                "parts": [ { "text": system } ]
-            })
-        );
-
         // Prepare payload
         let mut payload = serde_json::json!({ "contents": contents });
-        if let Some(system) = system_instruction {
-            payload["systemInstruction"] = system;
+        if let Some(system) = request.system_prompt {
+            payload["systemInstruction"] = serde_json::json!({
+                "parts": [ { "text": system } ]
+            });
         }
 
         // If structured output is requested, add schema and responseMimeType
@@ -84,18 +79,13 @@ impl LlmGenerationClient for Client {
             encode(&self.model), encode(api_key)
         );
 
-        let resp = match self.client.post(&url)
+        let resp = self.client.post(&url)
             .json(&payload)
             .send()
-            .await {
-            Ok(resp) => resp,
-            Err(e) => api_bail!("HTTP error: {e}"),
-        };
+            .await
+            .context("HTTP error")?;
 
-        let resp_json: Value = match resp.json().await {
-            Ok(json) => json,
-            Err(e) => api_bail!("Invalid JSON: {e}"),
-        };
+        let resp_json: Value = resp.json().await.context("Invalid JSON")?;
 
         if let Some(error) = resp_json.get("error") {
             bail!("Gemini API error: {:?}", error);
