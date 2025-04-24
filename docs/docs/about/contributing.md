@@ -24,15 +24,17 @@ We tag issues with the ["good first issue"](https://github.com/cocoindex-io/coco
 Following the steps below to get cocoindex build on latest codebase locally - if you are making changes to cocoindex funcionality and want to test it out.
 
 -   Install Rust toolchain: [docs](https://rust-lang.org/tools/install)
+    
+    Run `rustup update` to ensure you're on the latest version.
 
--   (Optional) Setup Python virtual environment:
+-   (Recommended) Setup Python virtual environment:
     ```bash
-    virtualenv --python=$(which python3.12) .venv
+    python3 -m venv .venv
     ```
     Activate the virtual environment, before any installings / buildings / runnings:
 
     ```bash
-    . .venv/bin/activate
+    source .venv/bin/activate
     ```
 
 -   Install maturin:
