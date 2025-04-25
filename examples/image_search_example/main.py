@@ -1,0 +1,105 @@
+from dotenv import load_dotenv
+import cocoindex
+import os
+import requests
+import base64
+
+load_dotenv(override=True)
+
+OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_MODEL = "gemma3"
+
+# 1. Extract caption from image using Ollama vision model
+def get_image_caption(image_path):
+    """
+    Use Ollama's gemma3 model to extract a detailed caption from an image.
+    Returns a full-sentence natural language description of the image.
+    """
+    with open(image_path, "rb") as f:
+        img_bytes = f.read()
+    img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+    prompt = (
+        "Describe this image in one detailed, natural language sentence, mentioning all distinct objects, creatures, actions, and the overall scene or setting. "
+        "For example: 'A dinosaur standing in the mountains at sunset, surrounded by trees and a river.'"
+    )
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "images": [img_b64],
+        "stream": False,
+    }
+    resp = requests.post(OLLAMA_URL, json=payload)
+    resp.raise_for_status()
+    result = resp.json()
+    text = result.get("response", "")
+    text = text.strip().replace("\n", "").rstrip(".")
+    return text
+
+# Helper for CocoIndex op.function transform
+@cocoindex.op.function()
+def filename_to_caption(fname: str) -> str:
+    return get_image_caption(os.path.join("img", fname))
+
+# 2. Embed the caption string
+def caption_to_embedding(caption: cocoindex.DataSlice) -> cocoindex.DataSlice:
+    return caption.transform(
+        cocoindex.functions.SentenceTransformerEmbed(
+            model="clip-ViT-B-32",
+        )
+    )
+
+# 3. CocoIndex flow: Ingest images, extract captions, embed, export to Qdrant
+@cocoindex.flow_def(name="ImageObjectEmbedding")
+def image_object_embedding_flow(flow_builder: cocoindex.FlowBuilder, data_scope: cocoindex.DataScope):
+    data_scope["images"] = flow_builder.add_source(
+        cocoindex.sources.LocalFile(path="img", included_patterns=["*.jpg", "*.jpeg", "*.png"])
+    )
+    img_embeddings = data_scope.add_collector()
+    with data_scope["images"].row() as img:
+        img["caption"] = img["filename"].transform(filename_to_caption)
+        img["embedding"] = caption_to_embedding(img["caption"])
+        img_embeddings.collect(
+            id=cocoindex.GeneratedField.UUID,
+            filename=img["filename"],
+            caption=img["caption"],
+            embedding=img["embedding"],
+        )
+    img_embeddings.export(
+        "img_embeddings",
+        cocoindex.storages.Qdrant(
+            collection_name="image_search",
+            grpc_url=os.getenv("QDRANT_GRPC_URL", "http://localhost:6334/"),
+        ),
+        primary_key_fields=["id"],
+        setup_by_user=True,
+    )
+
+# 4. Query handler for semantic search
+query_handler = cocoindex.query.SimpleSemanticsQueryHandler(
+    name="ImageObjectSearch",
+    flow=image_object_embedding_flow,
+    target_name="img_embeddings",
+    query_transform_flow=caption_to_embedding,
+    default_similarity_metric=cocoindex.VectorSimilarityMetric.COSINE_SIMILARITY,
+)
+
+# 5. CLI for semantic image search
+@cocoindex.main_fn()
+def _run():
+    while True:
+        try:
+            query = input("Describe what you want to see (sentence or keywords, Enter to quit): ")
+            if not query:
+                break
+            results, _ = query_handler.search(query, 2, "embedding")
+            print("\nSearch results:")
+            for result in results:
+                print(f"[{result.score:.3f}] {result.data['filename']}")
+                print(f"Caption: {result.data['caption']}")
+                print("---")
+            print()
+        except KeyboardInterrupt:
+            break
+
+if __name__ == "__main__":
+    _run()
