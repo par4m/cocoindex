@@ -2,6 +2,8 @@ use async_trait::async_trait;
 use crate::llm::{LlmGenerationClient, LlmSpec, LlmGenerateRequest, LlmGenerateResponse, ToJsonSchemaOptions, OutputFormat};
 use anyhow::{Result, bail, Context};
 use serde_json::Value;
+use json5;
+
 use crate::api_bail;
 use urlencoding::encode;
 
@@ -31,17 +33,10 @@ impl LlmGenerationClient for Client {
         &self,
         request: LlmGenerateRequest<'req>,
     ) -> Result<LlmGenerateResponse> {
-        // Compose the prompt/messages
-        let mut messages = vec![serde_json::json!({
+        let messages = vec![serde_json::json!({
             "role": "user",
             "content": request.user_prompt
         })];
-        if let Some(system) = request.system_prompt {
-            messages.insert(0, serde_json::json!({
-                "role": "system",
-                "content": system
-            }));
-        }
 
         let mut payload = serde_json::json!({
             "model": self.model,
@@ -49,34 +44,76 @@ impl LlmGenerationClient for Client {
             "max_tokens": 4096
         });
 
-        // If structured output is requested, add schema
-        if let Some(OutputFormat::JsonSchema { schema, .. }) = &request.output_format {
-            let schema_json = serde_json::to_value(schema)?;
-            payload["tools"] = serde_json::json!([
-                { "type": "json_object", "parameters": schema_json }
-            ]);
+        // Add system prompt as top-level field if present (required)
+        if let Some(system) = request.system_prompt {
+            payload["system"] = serde_json::json!(system);
         }
+
+        let OutputFormat::JsonSchema { schema, .. } = request.output_format.as_ref().expect("Anthropic client expects OutputFormat::JsonSchema for all requests");
+        let schema_json = serde_json::to_value(schema)?;
+        payload["tools"] = serde_json::json!([
+            { "type": "custom", "name": "extraction", "input_schema": schema_json }
+        ]);
 
         let url = "https://api.anthropic.com/v1/messages";
 
         let encoded_api_key = encode(&self.api_key);
+
         let resp = self.client
             .post(url)
             .header("x-api-key", encoded_api_key.as_ref())
+            .header("anthropic-version", "2023-06-01")
             .json(&payload)
             .send()
             .await
             .context("HTTP error")?;
-
         let resp_json: Value = resp.json().await.context("Invalid JSON")?;
-
         if let Some(error) = resp_json.get("error") {
             bail!("Anthropic API error: {:?}", error);
         }
-        let mut resp_json = resp_json;
-        let text = match &mut resp_json["content"][0]["text"] {
-            Value::String(s) => std::mem::take(s),
-            _ => bail!("No text in response"),
+
+        // Debug print full response
+        // println!("Anthropic API full response: {resp_json:?}");
+
+        let resp_content = &resp_json["content"];
+        let tool_name = "extraction"; 
+        let mut extracted_json: Option<Value> = None;
+        if let Some(array) = resp_content.as_array() {
+            for item in array {
+                if item.get("type") == Some(&Value::String("tool_use".to_string()))
+                    && item.get("name") == Some(&Value::String(tool_name.to_string()))
+                {
+                    if let Some(input) = item.get("input") {
+                        extracted_json = Some(input.clone());
+                        break;
+                    }
+                }
+            }
+        }
+        let text = if let Some(json) = extracted_json {
+            // Try strict JSON serialization first
+            serde_json::to_string(&json)?
+        } else {
+            // Fallback: try text if no tool output found
+            match &resp_json["content"][0]["text"] {
+                Value::String(s) => {
+                    // Try strict JSON parsing first
+                    match serde_json::from_str::<serde_json::Value>(s) {
+                        Ok(_) => s.clone(),
+                        Err(e) => {
+                            // Try permissive json5 parsing as fallback
+                            match json5::from_str::<serde_json::Value>(s) {
+                                Ok(_) => {
+                                    println!("[Anthropic] Used permissive JSON5 parser for output");
+                                    s.clone()
+                                },
+                                Err(e2) => return Err(anyhow::anyhow!(format!("No structured tool output or text found in response, and permissive JSON5 parsing also failed: {e}; {e2}")))
+                            }
+                        }
+                    }
+                },
+                _ => return Err(anyhow::anyhow!("No structured tool output or text found in response")),
+            }
         };
 
         Ok(LlmGenerateResponse {
