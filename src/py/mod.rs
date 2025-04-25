@@ -3,7 +3,7 @@ use crate::prelude::*;
 use crate::base::spec::VectorSimilarityMetric;
 use crate::execution::query;
 use crate::lib_context::{clear_lib_context, get_auth_registry, init_lib_context};
-use crate::ops::interface::QueryResults;
+use crate::ops::interface::{QueryResult, QueryResults};
 use crate::ops::py_factory::PyOpArgSchema;
 use crate::ops::{interface::ExecutorFactory, py_factory::PyFunctionFactory, register_factory};
 use crate::server::{self, ServerSettings};
@@ -255,33 +255,33 @@ impl SimpleSemanticsQueryHandler {
         Ok(())
     }
 
-    #[pyo3(signature = (query, limit, vector_field_name = None, similarity_matric = None))]
+    #[pyo3(signature = (query, limit, vector_field_name = None, similarity_metric = None))]
     pub fn search(
         &self,
         py: Python<'_>,
         query: String,
         limit: u32,
         vector_field_name: Option<String>,
-        similarity_matric: Option<Pythonized<VectorSimilarityMetric>>,
+        similarity_metric: Option<Pythonized<VectorSimilarityMetric>>,
     ) -> PyResult<(
-        Pythonized<QueryResults>,
+        Pythonized<Vec<QueryResult<serde_json::Value>>>,
         Pythonized<query::SimpleSemanticsQueryInfo>,
     )> {
         py.allow_threads(|| {
-            let (results, info) = get_runtime()
-                .block_on(async move {
-                    self.0
-                        .search(
-                            query,
-                            limit,
-                            vector_field_name,
-                            similarity_matric.map(|m| m.0),
-                        )
-                        .await
-                })
-                .into_py_result()?;
-            Ok((Pythonized(results), Pythonized(info)))
+            let (results, info) = get_runtime().block_on(async move {
+                self.0
+                    .search(
+                        query,
+                        limit,
+                        vector_field_name,
+                        similarity_metric.map(|m| m.0),
+                    )
+                    .await
+            })?;
+            let results = QueryResults::<serde_json::Value>::try_from(results)?;
+            anyhow::Ok((Pythonized(results.results), Pythonized(info)))
         })
+        .into_py_result()
     }
 }
 

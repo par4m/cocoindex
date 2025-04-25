@@ -1,11 +1,7 @@
 use crate::{lib_context::get_auth_registry, prelude::*};
 
-use indexmap::IndexMap;
-use serde::de::DeserializeOwned;
 use sqlx::PgPool;
 use std::{
-    borrow::Cow,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::{Debug, Display},
     str::FromStr,
 };
@@ -308,7 +304,7 @@ pub fn check_flow_setup_status(
         status: to_object_status(existing_state, desired_state)?,
         seen_flow_metadata_version: existing_state.and_then(|s| s.seen_flow_metadata_version),
         metadata_change,
-        tracking_table: tracking_table_change.into_setup_info(),
+        tracking_table: tracking_table_change.map(|c| c.into_setup_info()),
         target_resources,
         unknown_resources,
     })
@@ -412,25 +408,25 @@ pub async fn apply_changes(
                     .transpose()?,
             );
         }
-        if flow_status
-            .tracking_table
-            .status_check
-            .as_ref()
-            .map(|c| c.change_type() != SetupChangeType::NoChange)
-            .unwrap_or_default()
-        {
-            state_updates.insert(
-                db_metadata::ResourceTypeKey::new(
-                    MetadataRecordType::TrackingTable.to_string(),
-                    serde_json::Value::Null,
-                ),
-                flow_status
-                    .tracking_table
-                    .state
-                    .as_ref()
-                    .map(serde_json::to_value)
-                    .transpose()?,
-            );
+        if let Some(tracking_table) = &flow_status.tracking_table {
+            if tracking_table
+                .status_check
+                .as_ref()
+                .map(|c| c.change_type() != SetupChangeType::NoChange)
+                .unwrap_or_default()
+            {
+                state_updates.insert(
+                    db_metadata::ResourceTypeKey::new(
+                        MetadataRecordType::TrackingTable.to_string(),
+                        serde_json::Value::Null,
+                    ),
+                    tracking_table
+                        .state
+                        .as_ref()
+                        .map(serde_json::to_value)
+                        .transpose()?,
+                );
+            }
         }
         for target_resource in &flow_status.target_resources {
             state_updates.insert(
@@ -454,8 +450,9 @@ pub async fn apply_changes(
         )
         .await?;
 
-        maybe_update_resource_setup(write, &flow_status.tracking_table).await?;
-
+        if let Some(tracking_table) = &flow_status.tracking_table {
+            maybe_update_resource_setup(write, tracking_table).await?;
+        }
         for target_resource in &flow_status.target_resources {
             maybe_update_resource_setup(write, target_resource).await?;
         }
