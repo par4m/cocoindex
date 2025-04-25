@@ -109,9 +109,18 @@ pub async fn get_existing_setup_state(pool: &PgPool) -> Result<AllSetupState<Exi
                         flow_ss.tracking_table = from_metadata_record(state, staging_changes)?;
                     }
                     MetadataRecordType::Target(target_type) => {
+                        let normalized_key = {
+                            let registry = executor_factory_registry();
+                            match registry.get(&target_type) {
+                                Some(ExecutorFactory::ExportTarget(factory)) => {
+                                    factory.normalize_setup_key(metadata_record.key)?
+                                }
+                                _ => metadata_record.key.clone(),
+                            }
+                        };
                         flow_ss.targets.insert(
                             super::ResourceIdentifier {
-                                key: metadata_record.key.clone(),
+                                key: normalized_key,
                                 target_kind: target_type,
                             },
                             from_metadata_record(state, staging_changes)?,
@@ -206,7 +215,7 @@ fn group_resource_states<'a>(
     Ok(grouped)
 }
 
-pub fn check_flow_setup_status(
+pub async fn check_flow_setup_status(
     desired_state: Option<&FlowSetupState<DesiredMode>>,
     existing_state: Option<&FlowSetupState<ExistingMode>>,
 ) -> Result<FlowSetupStatusCheck> {
@@ -286,12 +295,16 @@ pub fn check_flow_setup_status(
         let status_check = if never_setup_by_sys {
             None
         } else {
-            Some(factory.check_setup_status(
-                &resource_id.key,
-                target_state,
-                existing_without_setup_by_user,
-                get_auth_registry(),
-            )?)
+            Some(
+                factory
+                    .check_setup_status(
+                        &resource_id.key,
+                        target_state,
+                        existing_without_setup_by_user,
+                        get_auth_registry(),
+                    )
+                    .await?,
+            )
         };
         target_resources.push(ResourceSetupInfo {
             key: resource_id.clone(),
@@ -310,7 +323,7 @@ pub fn check_flow_setup_status(
     })
 }
 
-pub fn sync_setup(
+pub async fn sync_setup(
     flows: &BTreeMap<String, Arc<FlowContext>>,
     all_setup_state: &AllSetupState<ExistingMode>,
 ) -> Result<AllSetupStatusCheck> {
@@ -319,7 +332,7 @@ pub fn sync_setup(
         let existing_state = all_setup_state.flows.get(flow_name);
         flow_status_checks.insert(
             flow_name.clone(),
-            check_flow_setup_status(Some(&flow_context.flow.desired_state), existing_state)?,
+            check_flow_setup_status(Some(&flow_context.flow.desired_state), existing_state).await?,
         );
     }
     Ok(AllSetupStatusCheck {
@@ -331,7 +344,7 @@ pub fn sync_setup(
     })
 }
 
-pub fn drop_setup(
+pub async fn drop_setup(
     flow_names: impl IntoIterator<Item = String>,
     all_setup_state: &AllSetupState<ExistingMode>,
 ) -> Result<AllSetupStatusCheck> {
@@ -343,7 +356,7 @@ pub fn drop_setup(
         if let Some(existing_state) = all_setup_state.flows.get(&flow_name) {
             flow_status_checks.insert(
                 flow_name,
-                check_flow_setup_status(None, Some(existing_state))?,
+                check_flow_setup_status(None, Some(existing_state)).await?,
             );
         }
     }
