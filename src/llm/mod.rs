@@ -22,7 +22,7 @@ pub struct LlmSpec {
     model: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum OutputFormat<'a> {
     JsonSchema {
         name: Cow<'a, str>,
@@ -38,8 +38,9 @@ pub struct LlmGenerateRequest<'a> {
 }
 
 #[derive(Debug)]
-pub struct LlmGenerateResponse {
-    pub text: String,
+pub enum LlmGenerationResponse {
+    Json(serde_json::Value),
+    Text(String),
 }
 
 #[async_trait]
@@ -47,7 +48,7 @@ pub trait LlmGenerationClient: Send + Sync {
     async fn generate<'req>(
         &self,
         request: LlmGenerateRequest<'req>,
-    ) -> Result<LlmGenerateResponse>;
+    ) -> Result<LlmGenerationResponse>;
 
     fn json_schema_options(&self) -> ToJsonSchemaOptions;
 }

@@ -51,7 +51,7 @@ impl LlmGenerationClient for Client {
     async fn generate<'req>(
         &self,
         request: super::LlmGenerateRequest<'req>,
-    ) -> Result<super::LlmGenerateResponse> {
+    ) -> Result<super::LlmGenerationResponse> {
         let req = OllamaRequest {
             model: &self.model,
             prompt: request.user_prompt.as_ref(),
@@ -71,9 +71,15 @@ impl LlmGenerationClient for Client {
             .await?;
         let body = res.text().await?;
         let json: OllamaResponse = serde_json::from_str(&body)?;
-        Ok(super::LlmGenerateResponse {
-            text: json.response,
-        })
+        // Check if output_format is JsonSchema, try to parse as JSON
+        if let Some(super::OutputFormat::JsonSchema { .. }) = request.output_format {
+            match serde_json::from_str::<serde_json::Value>(&json.response) {
+                Ok(val) => Ok(super::LlmGenerationResponse::Json(val)),
+                Err(_) => Ok(super::LlmGenerationResponse::Text(json.response)),
+            }
+        } else {
+            Ok(super::LlmGenerationResponse::Text(json.response))
+        }
     }
 
     fn json_schema_options(&self) -> super::ToJsonSchemaOptions {

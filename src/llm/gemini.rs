@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use crate::llm::{LlmGenerationClient, LlmSpec, LlmGenerateRequest, LlmGenerateResponse, ToJsonSchemaOptions, OutputFormat};
+use crate::llm::{LlmGenerationClient, LlmSpec, LlmGenerateRequest, LlmGenerationResponse, ToJsonSchemaOptions, OutputFormat};
 use anyhow::{Result, bail, Context};
 use serde_json::Value;
 use crate::api_bail;
@@ -48,7 +48,7 @@ impl LlmGenerationClient for Client {
     async fn generate<'req>(
         &self,
         request: LlmGenerateRequest<'req>,
-    ) -> Result<LlmGenerateResponse> {
+    ) -> Result<LlmGenerationResponse> {
         // Compose the prompt/messages
         let contents = vec![serde_json::json!({
             "role": "user",
@@ -96,7 +96,15 @@ impl LlmGenerationClient for Client {
             _ => bail!("No text in response"),
         };
 
-        Ok(LlmGenerateResponse { text })
+        // If output_format is JsonSchema, try to parse as JSON
+        if let Some(OutputFormat::JsonSchema { .. }) = request.output_format {
+            match serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(val) => Ok(LlmGenerationResponse::Json(val)),
+                Err(_) => Ok(LlmGenerationResponse::Text(text)),
+            }
+        } else {
+            Ok(LlmGenerationResponse::Text(text))
+        }
     }
 
     fn json_schema_options(&self) -> ToJsonSchemaOptions {
