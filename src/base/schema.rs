@@ -1,9 +1,7 @@
-use crate::builder::plan::AnalyzedValueMapping;
+use crate::prelude::*;
 
 use super::spec::*;
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, ops::Deref, sync::Arc};
+use crate::builder::plan::AnalyzedValueMapping;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VectorTypeSchema {
@@ -60,27 +58,26 @@ pub enum BasicValueType {
 impl std::fmt::Display for BasicValueType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BasicValueType::Bytes => write!(f, "bytes"),
-            BasicValueType::Str => write!(f, "str"),
-            BasicValueType::Bool => write!(f, "bool"),
-            BasicValueType::Int64 => write!(f, "int64"),
-            BasicValueType::Float32 => write!(f, "float32"),
-            BasicValueType::Float64 => write!(f, "float64"),
-            BasicValueType::Range => write!(f, "range"),
-            BasicValueType::Uuid => write!(f, "uuid"),
-            BasicValueType::Date => write!(f, "date"),
-            BasicValueType::Time => write!(f, "time"),
-            BasicValueType::LocalDateTime => write!(f, "local_datetime"),
-            BasicValueType::OffsetDateTime => write!(f, "offset_datetime"),
-            BasicValueType::Json => write!(f, "json"),
-            BasicValueType::Vector(s) => write!(
-                f,
-                "vector({}, {})",
-                s.dimension
-                    .map(|d| d.to_string())
-                    .unwrap_or_else(|| "*".to_string()),
-                s.element_type
-            ),
+            BasicValueType::Bytes => write!(f, "Bytes"),
+            BasicValueType::Str => write!(f, "Str"),
+            BasicValueType::Bool => write!(f, "Bool"),
+            BasicValueType::Int64 => write!(f, "Int64"),
+            BasicValueType::Float32 => write!(f, "Float32"),
+            BasicValueType::Float64 => write!(f, "Float64"),
+            BasicValueType::Range => write!(f, "Range"),
+            BasicValueType::Uuid => write!(f, "Uuid"),
+            BasicValueType::Date => write!(f, "Date"),
+            BasicValueType::Time => write!(f, "Time"),
+            BasicValueType::LocalDateTime => write!(f, "LocalDateTime"),
+            BasicValueType::OffsetDateTime => write!(f, "OffsetDateTime"),
+            BasicValueType::Json => write!(f, "Json"),
+            BasicValueType::Vector(s) => {
+                write!(f, "Vector[{}", s.element_type)?;
+                if let Some(dimension) = s.dimension {
+                    write!(f, ", {}", dimension)?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }
@@ -116,51 +113,50 @@ impl std::fmt::Display for StructSchema {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum CollectionKind {
-    /// A generic collection can have any row type.
-    Collection,
+pub enum TableKind {
+    /// An table with unordered rows, without key.
+    UTable,
     /// A table's first field is the key.
-    Table,
-    /// A list is a table whose key type is int64 starting from 0 continuously..
-    List,
+    #[serde(alias = "Table")]
+    KTable,
+    /// A table whose rows orders are preserved.
+    #[serde(alias = "List")]
+    LTable,
 }
 
-impl std::fmt::Display for CollectionKind {
+impl std::fmt::Display for TableKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CollectionKind::Collection => write!(f, "Collection"),
-            CollectionKind::Table => write!(f, "Table"),
-            CollectionKind::List => write!(f, "List"),
+            TableKind::UTable => write!(f, "Table"),
+            TableKind::KTable => write!(f, "KTable"),
+            TableKind::LTable => write!(f, "LTable"),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CollectionSchema {
-    pub kind: CollectionKind,
+pub struct TableSchema {
+    pub kind: TableKind,
     pub row: StructSchema,
-
-    #[serde(default = "Vec::new", skip_serializing_if = "Vec::is_empty")]
-    pub collectors: Vec<NamedSpec<Arc<CollectorSchema>>>,
 }
 
-impl CollectionSchema {
+impl TableSchema {
     pub fn has_key(&self) -> bool {
         match self.kind {
-            CollectionKind::Table => true,
-            CollectionKind::Collection | CollectionKind::List => false,
+            TableKind::KTable => true,
+            TableKind::UTable | TableKind::LTable => false,
         }
     }
 
     pub fn key_type(&self) -> Option<&EnrichedValueType> {
         match self.kind {
-            CollectionKind::Table => self
+            TableKind::KTable => self
                 .row
                 .fields
                 .first()
                 .as_ref()
                 .map(|field| &field.value_type),
-            CollectionKind::Collection | CollectionKind::List => None,
+            TableKind::UTable | TableKind::LTable => None,
         }
     }
 
@@ -168,42 +164,25 @@ impl CollectionSchema {
         Self {
             kind: self.kind,
             row: self.row.without_attrs(),
-            collectors: self
-                .collectors
-                .iter()
-                .map(|c| NamedSpec {
-                    name: c.name.clone(),
-                    spec: Arc::from(c.spec.without_attrs()),
-                })
-                .collect(),
         }
     }
 }
 
-impl std::fmt::Display for CollectionSchema {
+impl std::fmt::Display for TableSchema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}({}", self.kind, self.row)?;
-        for collector in self.collectors.iter() {
-            write!(f, "; COLLECTOR {} ({})", collector.name, collector.spec)?;
-        }
-        write!(f, ")")?;
-        Ok(())
+        write!(f, "{}({})", self.kind, self.row)
     }
 }
 
-impl CollectionSchema {
-    pub fn new(kind: CollectionKind, row: StructSchema) -> Self {
-        Self {
-            kind,
-            row,
-            collectors: Default::default(),
-        }
+impl TableSchema {
+    pub fn new(kind: TableKind, row: StructSchema) -> Self {
+        Self { kind, row }
     }
 
     pub fn key_field(&self) -> Option<&FieldSchema> {
         match self.kind {
-            CollectionKind::Table => Some(self.row.fields.first().unwrap()),
-            CollectionKind::Collection | CollectionKind::List => None,
+            TableKind::KTable => Some(self.row.fields.first().unwrap()),
+            TableKind::UTable | TableKind::LTable => None,
         }
     }
 }
@@ -217,7 +196,7 @@ pub enum ValueType {
     Basic(BasicValueType),
 
     #[serde(untagged)]
-    Collection(CollectionSchema),
+    Table(TableSchema),
 }
 
 impl ValueType {
@@ -225,7 +204,7 @@ impl ValueType {
         match self {
             ValueType::Basic(_) => None,
             ValueType::Struct(_) => None,
-            ValueType::Collection(c) => c.key_type(),
+            ValueType::Table(c) => c.key_type(),
         }
     }
 
@@ -234,7 +213,7 @@ impl ValueType {
         match self {
             ValueType::Basic(a) => ValueType::Basic(a.clone()),
             ValueType::Struct(a) => ValueType::Struct(a.without_attrs()),
-            ValueType::Collection(a) => ValueType::Collection(a.without_attrs()),
+            ValueType::Table(a) => ValueType::Table(a.without_attrs()),
         }
     }
 }
@@ -307,7 +286,7 @@ impl std::fmt::Display for ValueType {
         match self {
             ValueType::Basic(b) => write!(f, "{}", b),
             ValueType::Struct(s) => write!(f, "{}", s),
-            ValueType::Collection(c) => write!(f, "{}", c),
+            ValueType::Table(c) => write!(f, "{}", c),
         }
     }
 }
@@ -407,16 +386,27 @@ impl CollectorSchema {
     }
 }
 
-/// Top-level schema for a flow instance.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DataSchema {
-    pub schema: StructSchema,
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OpScopeSchema {
+    /// Output schema for transform ops.
+    pub op_output_types: HashMap<FieldName, EnrichedValueType>,
 
-    #[serde(default = "Vec::new", skip_serializing_if = "Vec::is_empty")]
+    /// Child op scope for foreach ops.
+    pub op_scopes: HashMap<String, Arc<OpScopeSchema>>,
+
+    /// Collectors for the current scope.
     pub collectors: Vec<NamedSpec<Arc<CollectorSchema>>>,
 }
 
-impl Deref for DataSchema {
+/// Top-level schema for a flow instance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlowSchema {
+    pub schema: StructSchema,
+
+    pub root_op_scope: OpScopeSchema,
+}
+
+impl std::ops::Deref for FlowSchema {
     type Target = StructSchema;
 
     fn deref(&self) -> &Self::Target {
