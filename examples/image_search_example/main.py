@@ -97,7 +97,7 @@ app.mount("/img", StaticFiles(directory="img"), name="img")
 # --- CocoIndex initialization on startup ---
 @app.on_event("startup")
 def startup_event():
-    settings = cocoindex.Settings.from_env()
+    settings = cocoindex.setting.Settings.from_env()
     cocoindex.init(settings)
     app.state.query_handler = cocoindex.query.SimpleSemanticsQueryHandler(
         name="ImageObjectSearch",
@@ -133,7 +133,7 @@ def search(q: str = Query(..., description="Search query"), limit: int = Query(5
 # --- CLI entrypoint ---
 @main_fn()
 def _run():
-    settings = cocoindex.Settings.from_env()
+    settings = cocoindex.setting.Settings.from_env()
     cocoindex.init(settings)
     query_handler = cocoindex.query.SimpleSemanticsQueryHandler(
         name="ImageObjectSearch",
