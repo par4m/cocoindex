@@ -1,4 +1,10 @@
+# Image Search with CocoIndex
+
 ![image](https://github.com/user-attachments/assets/3a696344-c9b4-46e8-9413-6229dbb8672a)
+
+- QDrant for Vector Storage
+- Ollama Gemma3 (Image to Text)
+- CLIP ViT-L/14 - Embeddings Model
 
 ## Make sure Postgres and Qdrant are running
 ```
