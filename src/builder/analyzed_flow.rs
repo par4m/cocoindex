@@ -9,7 +9,7 @@ use crate::{
 
 pub struct AnalyzedFlow {
     pub flow_instance: spec::FlowInstanceSpec,
-    pub data_schema: schema::DataSchema,
+    pub data_schema: schema::FlowSchema,
     pub desired_state: setup::FlowSetupState<setup::DesiredMode>,
     /// It's None if the flow is not up to date
     pub execution_plan:
@@ -30,7 +30,7 @@ impl AnalyzedFlow {
             registry,
         )?;
         let setup_status_check =
-            setup::check_flow_setup_status(Some(&desired_state), existing_flow_ss)?;
+            setup::check_flow_setup_status(Some(&desired_state), existing_flow_ss).await?;
         let execution_plan = if setup_status_check.is_up_to_date() {
             Some(
                 async move {
@@ -67,7 +67,7 @@ impl AnalyzedFlow {
 
 pub struct AnalyzedTransientFlow {
     pub transient_flow_instance: spec::TransientFlowSpec,
-    pub data_schema: schema::DataSchema,
+    pub data_schema: schema::FlowSchema,
     pub execution_plan: plan::TransientExecutionPlan,
     pub output_type: schema::EnrichedValueType,
 }

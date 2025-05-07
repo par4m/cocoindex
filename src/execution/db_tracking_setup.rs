@@ -97,6 +97,7 @@ impl TrackingTableSetupStatusCheck {
             state: self.desired_state.clone(),
             description: "Tracking Table".to_string(),
             status_check: Some(self),
+            legacy_key: None,
         }
     }
 }
@@ -157,7 +158,7 @@ impl ResourceSetupStatusCheck for TrackingTableSetupStatusCheck {
     }
 
     async fn apply_change(&self) -> Result<()> {
-        let pool = &get_lib_context()?.pool;
+        let pool = &get_lib_context()?.builtin_db_pool;
         if let Some(desired) = &self.desired_state {
             for lagacy_name in self.legacy_table_names.iter() {
                 let query = format!(

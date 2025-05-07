@@ -1,5 +1,6 @@
 use crate::prelude::*;
 
+use crate::base::schema::{FieldSchema, ValueType};
 use crate::base::spec::VectorSimilarityMetric;
 use crate::execution::query;
 use crate::lib_context::{clear_lib_context, get_auth_registry, init_lib_context};
@@ -13,6 +14,7 @@ use pyo3::{exceptions::PyException, prelude::*};
 use pyo3_async_runtimes::tokio::future_into_py;
 use std::collections::btree_map;
 use std::fmt::Write;
+use std::sync::Arc;
 
 mod convert;
 pub use convert::*;
@@ -126,7 +128,7 @@ impl FlowLiveUpdater {
         future_into_py(py, async move {
             let live_updater = execution::FlowLiveUpdater::start(
                 flow,
-                &get_lib_context().into_py_result()?.pool,
+                &get_lib_context().into_py_result()?.builtin_db_pool,
                 options.into_inner(),
             )
             .await
@@ -185,13 +187,65 @@ impl Flow {
                         &exec_plan,
                         &self.0.flow.data_schema,
                         options.into_inner(),
-                        &get_lib_context()?.pool,
+                        &get_lib_context()?.builtin_db_pool,
                     )
                     .await
                 })
                 .into_py_result()?;
             Ok(())
         })
+    }
+
+    pub fn get_schema(&self) -> Vec<(String, String, String)> {
+        let schema = &self.0.flow.data_schema;
+        let mut result = Vec::new();
+
+        fn process_fields(
+            fields: &[FieldSchema],
+            prefix: &str,
+            result: &mut Vec<(String, String, String)>,
+        ) {
+            for field in fields {
+                let field_name = format!("{}{}", prefix, field.name);
+
+                let mut field_type = match &field.value_type.typ {
+                    ValueType::Basic(basic) => format!("{}", basic),
+                    ValueType::Table(t) => format!("{}", t.kind),
+                    ValueType::Struct(_) => "Struct".to_string(),
+                };
+
+                if field.value_type.nullable {
+                    field_type.push('?');
+                }
+
+                let attr_str = if field.value_type.attrs.is_empty() {
+                    String::new()
+                } else {
+                    field
+                        .value_type
+                        .attrs
+                        .keys()
+                        .map(|k| k.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+
+                result.push((field_name.clone(), field_type, attr_str));
+
+                match &field.value_type.typ {
+                    ValueType::Struct(s) => {
+                        process_fields(&s.fields, &format!("{}.", field_name), result);
+                    }
+                    ValueType::Table(t) => {
+                        process_fields(&t.row.fields, &format!("{}[].", field_name), result);
+                    }
+                    ValueType::Basic(_) => {}
+                }
+            }
+        }
+
+        process_fields(&schema.schema.fields, "", &mut result);
+        result
     }
 }
 
@@ -304,20 +358,32 @@ impl SetupStatusCheck {
 }
 
 #[pyfunction]
-fn sync_setup() -> PyResult<SetupStatusCheck> {
+fn sync_setup(py: Python<'_>) -> PyResult<SetupStatusCheck> {
     let lib_context = get_lib_context().into_py_result()?;
     let flows = lib_context.flows.lock().unwrap();
     let all_setup_states = lib_context.all_setup_states.read().unwrap();
-    let setup_status = setup::sync_setup(&flows, &all_setup_states).into_py_result()?;
-    Ok(SetupStatusCheck(setup_status))
+    py.allow_threads(|| {
+        get_runtime()
+            .block_on(async {
+                let setup_status = setup::sync_setup(&flows, &all_setup_states).await?;
+                anyhow::Ok(SetupStatusCheck(setup_status))
+            })
+            .into_py_result()
+    })
 }
 
 #[pyfunction]
-fn drop_setup(flow_names: Vec<String>) -> PyResult<SetupStatusCheck> {
+fn drop_setup(py: Python<'_>, flow_names: Vec<String>) -> PyResult<SetupStatusCheck> {
     let lib_context = get_lib_context().into_py_result()?;
     let all_setup_states = lib_context.all_setup_states.read().unwrap();
-    let setup_status = setup::drop_setup(flow_names, &all_setup_states).into_py_result()?;
-    Ok(SetupStatusCheck(setup_status))
+    py.allow_threads(|| {
+        get_runtime()
+            .block_on(async {
+                let setup_status = setup::drop_setup(flow_names, &all_setup_states).await?;
+                anyhow::Ok(SetupStatusCheck(setup_status))
+            })
+            .into_py_result()
+    })
 }
 
 #[pyfunction]
@@ -336,7 +402,7 @@ fn apply_setup_changes(py: Python<'_>, setup_status: &SetupStatusCheck) -> PyRes
                 setup::apply_changes(
                     &mut std::io::stdout(),
                     &setup_status.0,
-                    &get_lib_context()?.pool,
+                    &get_lib_context()?.builtin_db_pool,
                 )
                 .await
             })
@@ -370,7 +436,7 @@ fn cocoindex_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<builder::flow_builder::FlowBuilder>()?;
     m.add_class::<builder::flow_builder::DataCollector>()?;
     m.add_class::<builder::flow_builder::DataSlice>()?;
-    m.add_class::<builder::flow_builder::DataScopeRef>()?;
+    m.add_class::<builder::flow_builder::OpScopeRef>()?;
     m.add_class::<Flow>()?;
     m.add_class::<FlowLiveUpdater>()?;
     m.add_class::<TransientFlow>()?;

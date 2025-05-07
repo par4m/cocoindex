@@ -190,13 +190,17 @@ pub trait ExportTargetFactory: Send + Sync {
 
     /// Will not be called if it's setup by user.
     /// It returns an error if the target only supports setup by user.
-    fn check_setup_status(
+    async fn check_setup_status(
         &self,
         key: &serde_json::Value,
         desired_state: Option<serde_json::Value>,
         existing_states: setup::CombinedState<serde_json::Value>,
         auth_registry: &Arc<AuthRegistry>,
     ) -> Result<Box<dyn setup::ResourceSetupStatusCheck>>;
+
+    /// Normalize the key. e.g. the JSON format may change (after code change, e.g. new optional field or field ordering), even if the underlying value is not changed.
+    /// This should always return the canonical serialized form.
+    fn normalize_setup_key(&self, key: &serde_json::Value) -> Result<serde_json::Value>;
 
     fn check_state_compatibility(
         &self,

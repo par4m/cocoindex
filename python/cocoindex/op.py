@@ -5,11 +5,11 @@ import asyncio
 import dataclasses
 import inspect
 
-from typing import get_type_hints, Protocol, Any, Callable, Awaitable, dataclass_transform
+from typing import Protocol, Any, Callable, Awaitable, dataclass_transform
 from enum import Enum
 
-from .typing import encode_enriched_type
-from .convert import to_engine_value, make_engine_value_converter
+from .typing import encode_enriched_type, resolve_forward_ref
+from .convert import encode_engine_value, make_engine_value_decoder
 from . import _engine
 
 class OpCategory(Enum):
@@ -129,7 +129,7 @@ def _register_op_factory(
                     raise ValueError(
                         f"Too many positional arguments passed in: {len(args)} > {next_param_idx}")
                 self._args_converters.append(
-                    make_engine_value_converter(
+                    make_engine_value_decoder(
                         [arg_name], arg.value_type['type'], arg_param.annotation))
                 if arg_param.kind != inspect.Parameter.VAR_POSITIONAL:
                     next_param_idx += 1
@@ -146,7 +146,7 @@ def _register_op_factory(
                 if expected_arg is None:
                     raise ValueError(f"Unexpected keyword argument passed in: {kwarg_name}")
                 arg_param = expected_arg[1]
-                self._kwargs_converters[kwarg_name] = make_engine_value_converter(
+                self._kwargs_converters[kwarg_name] = make_engine_value_decoder(
                     [kwarg_name], kwarg.value_type['type'], arg_param.annotation)
 
             missing_args = [name for (name, arg) in expected_kwargs
@@ -188,7 +188,7 @@ def _register_op_factory(
                     output = await self._acall(*converted_args, **converted_kwargs)
             else:
                 output = await self._acall(*converted_args, **converted_kwargs)
-            return to_engine_value(output)
+            return encode_engine_value(output)
 
     _WrappedClass.__name__ = executor_cls.__name__
     _WrappedClass.__doc__ = executor_cls.__doc__
@@ -214,10 +214,11 @@ def executor_class(**args) -> Callable[[type], type]:
         """
         Decorate a class to provide an executor for an op.
         """
-        type_hints = get_type_hints(cls)
+        # Use `__annotations__` instead of `get_type_hints`, to avoid resolving forward references.
+        type_hints = cls.__annotations__
         if 'spec' not in type_hints:
             raise TypeError("Expect a `spec` field with type hint")
-        spec_cls = type_hints['spec']
+        spec_cls = resolve_forward_ref(type_hints['spec'])
         sig = inspect.signature(cls.__call__)
         return _register_op_factory(
             category=spec_cls._op_category,
