@@ -63,6 +63,21 @@ impl LlmGenerationClient for Client {
             system: request.system_prompt.as_ref().map(|s| s.as_ref()),
             stream: Some(false),
         };
+        let mut system_prompt = request.system_prompt.unwrap_or_default();
+        if matches!(request.output_format, Some(super::OutputFormat::JsonSchema { .. })) {
+            system_prompt = format!("{STRICT_JSON_PROMPT}\n\n{system_prompt}");
+        }
+        let req = OllamaRequest {
+            model: &self.model,
+            prompt: request.user_prompt.as_ref(),
+            format: request.output_format.as_ref().map(
+                |super::OutputFormat::JsonSchema { schema, .. }| {
+                    OllamaFormat::JsonSchema(schema.as_ref())
+                },
+            ),
+            system: Some(system_prompt.as_str()),
+            stream: Some(false),
+        };
         let res = self
             .reqwest_client
             .post(self.generate_url.as_str())

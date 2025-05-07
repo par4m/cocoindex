@@ -44,9 +44,11 @@ impl LlmGenerationClient for Client {
         });
 
         // Add system prompt as top-level field if present (required)
-        if let Some(system) = request.system_prompt {
-            payload["system"] = serde_json::json!(system);
+        let mut system_prompt = request.system_prompt.unwrap_or_default();
+        if matches!(request.output_format, Some(OutputFormat::JsonSchema { .. })) {
+            system_prompt = format!("{STRICT_JSON_PROMPT}\n\n{system_prompt}");
         }
+        payload["system"] = serde_json::json!(system_prompt);
 
         // Extract schema from output_format, error if not JsonSchema
         let schema = match request.output_format.as_ref() {

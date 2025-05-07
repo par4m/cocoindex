@@ -57,11 +57,15 @@ impl LlmGenerationClient for Client {
 
         // Prepare payload
         let mut payload = serde_json::json!({ "contents": contents });
-        if let Some(system) = request.system_prompt {
-            payload["systemInstruction"] = serde_json::json!({
-                "parts": [ { "text": system } ]
-            });
-        }
+        use crate::llm::prompt_utils::STRICT_JSON_PROMPT;
+if let Some(mut system) = request.system_prompt {
+    if matches!(request.output_format, Some(OutputFormat::JsonSchema { .. })) {
+        system = format!("{STRICT_JSON_PROMPT}\n\n{system}");
+    }
+    payload["systemInstruction"] = serde_json::json!({
+        "parts": [ { "text": system } ]
+    });
+}
 
         // If structured output is requested, add schema and responseMimeType
         if let Some(OutputFormat::JsonSchema { schema, .. }) = &request.output_format {
