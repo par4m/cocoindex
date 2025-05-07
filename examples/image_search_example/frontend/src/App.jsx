@@ -17,7 +17,7 @@ export default function App() {
       const resp = await fetch(`${API_URL}?q=${encodeURIComponent(query)}`);
       if (!resp.ok) throw new Error('Search failed');
       const data = await resp.json();
-      setResults(data.results || []);
+      setResults(data.results ?? []);
     } catch (err) {
       setError(err.message);
     } finally {

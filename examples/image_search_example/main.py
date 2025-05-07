@@ -120,12 +120,6 @@ def search(q: str = Query(..., description="Search query"), limit: int = Query(5
                 "filename": row["filename"],
                 "score": result.score
             })
-        elif isinstance(result, dict):
-            # Only include filename and score if present
-            out.append({
-                "filename": result.get("filename"),
-                "score": result.get("score", 0.0)
-            })
         else:
             out.append({"raw": str(result)})
     return {"results": out}
@@ -133,38 +127,7 @@ def search(q: str = Query(..., description="Search query"), limit: int = Query(5
 # --- CLI entrypoint ---
 @main_fn()
 def _run():
-    settings = cocoindex.setting.Settings.from_env()
-    cocoindex.init(settings)
-    query_handler = cocoindex.query.SimpleSemanticsQueryHandler(
-        name="ImageObjectSearch",
-        flow=image_object_embedding_flow,
-        target_name="img_embeddings",
-        query_transform_flow=caption_to_embedding,
-        default_similarity_metric=cocoindex.VectorSimilarityMetric.COSINE_SIMILARITY,
-    )
-    while True:
-        try:
-            query = input("Describe what you want to see (sentence or keywords, Enter to quit): ")
-            if not query:
-                break
-            results, _ = query_handler.search(query, 5, "embedding")
-            print("\nSearch results:")
-            for result in results:
-                if hasattr(result, 'score') and hasattr(result, 'data'):
-                    data = result.data
-                    score = result.score
-                elif isinstance(result, dict):
-                    data = result
-                    score = result.get('score', 0.0)
-                else:
-                    print(result)
-                    continue
-                print(f"[{score:.3f}] {data['filename']}")
-                print(f"Caption: {data.get('caption', '')}")
-                print("---")
-            print()
-        except KeyboardInterrupt:
-            break
-
+    pass
+    
 if __name__ == "__main__":
     _run()
