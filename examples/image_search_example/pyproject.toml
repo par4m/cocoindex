@@ -1,6 +1,0 @@
-[project]
-name = "image-search"
-version = "0.1.0"
-description = "Simple example for cocoindex: build embedding index based on Google Drive files."
-requires-python = ">=3.11"
-dependencies = ["cocoindex", "python-dotenv>=1.0.1", "requests"]
