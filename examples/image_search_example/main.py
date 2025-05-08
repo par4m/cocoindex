@@ -14,22 +14,20 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "gemma3"
 
 # 1. Extract caption from image using Ollama vision model
-def get_image_caption(image_path):
+def get_image_caption(img_bytes: bytes):
     """
     Use Ollama's gemma3 model to extract a detailed caption from an image.
     Returns a full-sentence natural language description of the image.
     """
-    with open(image_path, "rb") as f:
-        img_bytes = f.read()
     img_b64 = base64.b64encode(img_bytes).decode("utf-8")
     prompt = (
-    "Describe this image in one detailed, natural language sentence. "
-    "Always explicitly name every visible animal species, object, and the main scene. "
-    "Be specific about the type, color, and any distinguishing features. "
-    "Avoid generic words like 'animal' or 'creature'—always use the most precise name (e.g., 'elephant', 'cat', 'lion', 'zebra'). "
-    "If an animal is present, mention its species and what it is doing. "
-    "For example: 'A large grey elephant standing in a grassy savanna, with trees in the background.'"
-)
+        "Describe this image in one detailed, natural language sentence. "
+        "Always explicitly name every visible animal species, object, and the main scene. "
+        "Be specific about the type, color, and any distinguishing features. "
+        "Avoid generic words like 'animal' or 'creature'—always use the most precise name (e.g., 'elephant', 'cat', 'lion', 'zebra'). "
+        "If an animal is present, mention its species and what it is doing. "
+        "For example: 'A large grey elephant standing in a grassy savanna, with trees in the background.'"
+    )
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,
@@ -45,8 +43,8 @@ def get_image_caption(image_path):
 
 # Helper for CocoIndex op.function transform
 @cocoindex.op.function()
-def filename_to_caption(fname: str) -> str:
-    return get_image_caption(os.path.join("img", fname))
+def content_to_caption(content: bytes) -> str:
+    return get_image_caption(content)
 
 # 2. Embed the caption string
 def caption_to_embedding(caption: cocoindex.DataSlice) -> cocoindex.DataSlice:
@@ -60,11 +58,11 @@ def caption_to_embedding(caption: cocoindex.DataSlice) -> cocoindex.DataSlice:
 @cocoindex.flow_def(name="ImageObjectEmbedding")
 def image_object_embedding_flow(flow_builder: cocoindex.FlowBuilder, data_scope: cocoindex.DataScope):
     data_scope["images"] = flow_builder.add_source(
-        cocoindex.sources.LocalFile(path="img", included_patterns=["*.jpg", "*.jpeg", "*.png"])
+        cocoindex.sources.LocalFile(path="img", included_patterns=["*.jpg", "*.jpeg", "*.png"], binary=True)
     )
     img_embeddings = data_scope.add_collector()
     with data_scope["images"].row() as img:
-        img["caption"] = img["filename"].transform(filename_to_caption)
+        img["caption"] = img["content"].transform(content_to_caption)
         img["embedding"] = caption_to_embedding(img["caption"])
         img_embeddings.collect(
             id=cocoindex.GeneratedField.UUID,
