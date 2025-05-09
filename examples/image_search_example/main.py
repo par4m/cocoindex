@@ -14,7 +14,8 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "gemma3"
 
 # 1. Extract caption from image using Ollama vision model
-def get_image_caption(img_bytes: bytes):
+@cocoindex.op.function()
+def get_image_caption(img_bytes: bytes) -> str:
     """
     Use Ollama's gemma3 model to extract a detailed caption from an image.
     Returns a full-sentence natural language description of the image.
@@ -41,10 +42,6 @@ def get_image_caption(img_bytes: bytes):
     text = text.strip().replace("\n", "").rstrip(".")
     return text
 
-# Helper for CocoIndex op.function transform
-@cocoindex.op.function()
-def content_to_caption(content: bytes) -> str:
-    return get_image_caption(content)
 
 # 2. Embed the caption string
 def caption_to_embedding(caption: cocoindex.DataSlice) -> cocoindex.DataSlice:
@@ -62,7 +59,7 @@ def image_object_embedding_flow(flow_builder: cocoindex.FlowBuilder, data_scope:
     )
     img_embeddings = data_scope.add_collector()
     with data_scope["images"].row() as img:
-        img["caption"] = img["content"].transform(content_to_caption)
+        img["caption"] = img["content"].transform(get_image_caption)
         img["embedding"] = caption_to_embedding(img["caption"])
         img_embeddings.collect(
             id=cocoindex.GeneratedField.UUID,
