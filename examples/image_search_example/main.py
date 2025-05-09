@@ -108,15 +108,12 @@ def search(q: str = Query(..., description="Search query"), limit: int = Query(5
     results, _ = query_handler.search(q, limit, "embedding")
     out = []
     for result in results:
-        if hasattr(result, "data") and hasattr(result, "score"):
-            row = dict(result.data)
-            # Only include filename and score
-            out.append({
-                "filename": row["filename"],
-                "score": result.score
-            })
-        else:
-            out.append({"raw": str(result)})
+        row = dict(result.data)
+        # Only include filename and score
+        out.append({
+            "filename": row["filename"],
+            "score": result.score
+        })
     return {"results": out}
 
 # --- CLI entrypoint ---
