@@ -196,7 +196,7 @@ pub trait ExportTargetFactory: Send + Sync {
         desired_state: Option<serde_json::Value>,
         existing_states: setup::CombinedState<serde_json::Value>,
         auth_registry: &Arc<AuthRegistry>,
-    ) -> Result<Box<dyn setup::ResourceSetupStatusCheck>>;
+    ) -> Result<Box<dyn setup::ResourceSetupStatus>>;
 
     /// Normalize the key. e.g. the JSON format may change (after code change, e.g. new optional field or field ordering), even if the underlying value is not changed.
     /// This should always return the canonical serialized form.
@@ -213,6 +213,11 @@ pub trait ExportTargetFactory: Send + Sync {
     async fn apply_mutation(
         &self,
         mutations: Vec<ExportTargetMutationWithContext<'async_trait, dyn Any + Send + Sync>>,
+    ) -> Result<()>;
+
+    async fn apply_setup_changes(
+        &self,
+        setup_status: Vec<&'async_trait dyn setup::ResourceSetupStatus>,
     ) -> Result<()>;
 }
 

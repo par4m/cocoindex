@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use crate::setup::ResourceSetupStatus;
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -288,6 +289,7 @@ pub trait StorageFactoryBase: ExportTargetFactory + Send + Sync + 'static {
     type DeclarationSpec: DeserializeOwned + Send + Sync;
     type Key: Debug + Clone + Serialize + DeserializeOwned + Eq + Hash + Send + Sync;
     type SetupState: Debug + Clone + Serialize + DeserializeOwned + Send + Sync;
+    type SetupStatus: ResourceSetupStatus;
     type ExportContext: Send + Sync + 'static;
 
     fn name(&self) -> &str;
@@ -310,7 +312,7 @@ pub trait StorageFactoryBase: ExportTargetFactory + Send + Sync + 'static {
         desired_state: Option<Self::SetupState>,
         existing_states: setup::CombinedState<Self::SetupState>,
         auth_registry: &Arc<AuthRegistry>,
-    ) -> Result<impl setup::ResourceSetupStatusCheck + 'static>;
+    ) -> Result<Self::SetupStatus>;
 
     fn check_state_compatibility(
         &self,
@@ -333,6 +335,11 @@ pub trait StorageFactoryBase: ExportTargetFactory + Send + Sync + 'static {
     async fn apply_mutation(
         &self,
         mutations: Vec<ExportTargetMutationWithContext<'async_trait, Self::ExportContext>>,
+    ) -> Result<()>;
+
+    async fn apply_setup_changes(
+        &self,
+        setup_status: Vec<&'async_trait Self::SetupStatus>,
     ) -> Result<()>;
 }
 
@@ -398,13 +405,13 @@ impl<T: StorageFactoryBase> ExportTargetFactory for T {
         desired_state: Option<serde_json::Value>,
         existing_states: setup::CombinedState<serde_json::Value>,
         auth_registry: &Arc<AuthRegistry>,
-    ) -> Result<Box<dyn setup::ResourceSetupStatusCheck>> {
+    ) -> Result<Box<dyn setup::ResourceSetupStatus>> {
         let key: T::Key = serde_json::from_value(key.clone())?;
         let desired_state: Option<T::SetupState> = desired_state
             .map(|v| serde_json::from_value(v.clone()))
             .transpose()?;
         let existing_states = from_json_combined_state(existing_states)?;
-        let status_check = StorageFactoryBase::check_setup_status(
+        let setup_status = StorageFactoryBase::check_setup_status(
             self,
             key,
             desired_state,
@@ -412,7 +419,7 @@ impl<T: StorageFactoryBase> ExportTargetFactory for T {
             auth_registry,
         )
         .await?;
-        Ok(Box::new(status_check))
+        Ok(Box::new(setup_status))
     }
 
     fn describe_resource(&self, key: &serde_json::Value) -> Result<String> {
@@ -456,8 +463,25 @@ impl<T: StorageFactoryBase> ExportTargetFactory for T {
             .collect::<Result<_>>()?;
         StorageFactoryBase::apply_mutation(self, mutations).await
     }
-}
 
+    async fn apply_setup_changes(
+        &self,
+        setup_status: Vec<&'async_trait dyn ResourceSetupStatus>,
+    ) -> Result<()> {
+        StorageFactoryBase::apply_setup_changes(
+            self,
+            setup_status
+                .into_iter()
+                .map(|s| -> anyhow::Result<_> {
+                    Ok(s.as_any()
+                        .downcast_ref::<T::SetupStatus>()
+                        .ok_or_else(|| anyhow!("Unexpected setup status type"))?)
+                })
+                .collect::<Result<Vec<_>>>()?,
+        )
+        .await
+    }
+}
 fn from_json_combined_state<T: Debug + Clone + Serialize + DeserializeOwned>(
     existing_states: setup::CombinedState<serde_json::Value>,
 ) -> Result<setup::CombinedState<T>> {

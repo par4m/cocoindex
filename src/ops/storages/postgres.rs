@@ -575,7 +575,7 @@ impl TableSetupAction {
 }
 
 #[derive(Debug)]
-pub struct SetupStatusCheck {
+pub struct SetupStatus {
     db_pool: PgPool,
     table_name: String,
 
@@ -585,7 +585,7 @@ pub struct SetupStatusCheck {
     desired_table_setup: Option<TableSetupAction>,
 }
 
-impl SetupStatusCheck {
+impl SetupStatus {
     fn new(
         db_pool: PgPool,
         table_name: String,
@@ -738,8 +738,7 @@ fn describe_index_spec(index_name: &str, index_spec: &VectorIndexDef) -> String 
     format!("{} {}", index_name, to_index_spec_sql(index_spec))
 }
 
-#[async_trait]
-impl setup::ResourceSetupStatusCheck for SetupStatusCheck {
+impl setup::ResourceSetupStatus for SetupStatus {
     fn describe_changes(&self) -> Vec<String> {
         let mut descriptions = vec![];
         if self.drop_existing {
@@ -821,6 +820,12 @@ impl setup::ResourceSetupStatusCheck for SetupStatusCheck {
         }
     }
 
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl SetupStatus {
     async fn apply_change(&self) -> Result<()> {
         let table_name = &self.table_name;
         if self.drop_existing {
@@ -907,6 +912,7 @@ impl StorageFactoryBase for Factory {
     type Spec = Spec;
     type DeclarationSpec = ();
     type SetupState = SetupState;
+    type SetupStatus = SetupStatus;
     type Key = TableId;
     type ExportContext = ExportContext;
 
@@ -976,8 +982,8 @@ impl StorageFactoryBase for Factory {
         desired: Option<SetupState>,
         existing: setup::CombinedState<SetupState>,
         auth_registry: &Arc<AuthRegistry>,
-    ) -> Result<impl setup::ResourceSetupStatusCheck + 'static> {
-        Ok(SetupStatusCheck::new(
+    ) -> Result<SetupStatus> {
+        Ok(SetupStatus::new(
             get_db_pool(key.database.as_ref(), auth_registry).await?,
             key.table_name,
             desired,
@@ -1046,6 +1052,16 @@ impl StorageFactoryBase for Factory {
                     .await?;
             }
             txn.commit().await?;
+        }
+        Ok(())
+    }
+
+    async fn apply_setup_changes(
+        &self,
+        setup_status: Vec<&'async_trait Self::SetupStatus>,
+    ) -> Result<()> {
+        for setup_status in setup_status.iter() {
+            setup_status.apply_change().await?;
         }
         Ok(())
     }

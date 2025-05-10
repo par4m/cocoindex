@@ -1,8 +1,8 @@
 use crate::prelude::*;
 
 use super::spec::{GraphDeclaration, GraphElementMapping, NodeFromFieldsSpec, TargetFieldMapping};
-use crate::setup::components::{self, State};
-use crate::setup::{ResourceSetupStatusCheck, SetupChangeType};
+use crate::setup::components::{self, apply_component_changes, State};
+use crate::setup::{ResourceSetupStatus, SetupChangeType};
 use crate::{ops::sdk::*, setup::CombinedState};
 
 use indoc::formatdoc;
@@ -688,7 +688,7 @@ impl ComponentKind {
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct ComponentKey {
+pub struct ComponentKey {
     kind: ComponentKind,
     name: String,
 }
@@ -754,13 +754,13 @@ impl components::State<ComponentKey> for ComponentState {
     }
 }
 
-struct SetupComponentOperator {
+pub struct SetupComponentOperator {
     graph_pool: Arc<GraphPool>,
     conn_spec: ConnectionSpec,
 }
 
 #[async_trait]
-impl components::Operator for SetupComponentOperator {
+impl components::SetupOperator for SetupComponentOperator {
     type Key = ComponentKey;
     type State = ComponentState;
     type SetupState = SetupState;
@@ -853,21 +853,17 @@ fn build_composite_field_names(qualifier: &str, field_names: &[String]) -> Strin
         format!("({})", strs)
     }
 }
-#[derive(Derivative)]
-#[derivative(Debug)]
-struct SetupStatusCheck {
+#[derive(Debug)]
+pub struct GraphElementDataSetupStatus {
     key: GraphElement,
-    #[derivative(Debug = "ignore")]
-    graph_pool: Arc<GraphPool>,
     conn_spec: ConnectionSpec,
     data_clear: Option<DataClearAction>,
     change_type: SetupChangeType,
 }
 
-impl SetupStatusCheck {
+impl GraphElementDataSetupStatus {
     fn new(
         key: GraphElement,
-        graph_pool: Arc<GraphPool>,
         conn_spec: ConnectionSpec,
         desired_state: Option<&SetupState>,
         existing: &CombinedState<SetupState>,
@@ -899,7 +895,6 @@ impl SetupStatusCheck {
 
         Self {
             key,
-            graph_pool,
             conn_spec,
             data_clear,
             change_type,
@@ -907,8 +902,7 @@ impl SetupStatusCheck {
     }
 }
 
-#[async_trait]
-impl ResourceSetupStatusCheck for SetupStatusCheck {
+impl ResourceSetupStatus for GraphElementDataSetupStatus {
     fn describe_changes(&self) -> Vec<String> {
         let mut result = vec![];
         if let Some(data_clear) = &self.data_clear {
@@ -934,42 +928,32 @@ impl ResourceSetupStatusCheck for SetupStatusCheck {
         self.change_type
     }
 
-    async fn apply_change(&self) -> Result<()> {
-        let graph = self.graph_pool.get_graph(&self.conn_spec).await?;
-        if let Some(data_clear) = &self.data_clear {
-            let delete_query = neo4rs::query(&formatdoc! {"
-                    CALL {{
-                        MATCH {matcher}
-                        WITH {var_name}
-                        {optional_orphan_condition}
-                        DELETE {var_name}
-                    }} IN TRANSACTIONS
-                ",
-                matcher = self.key.typ.matcher(CORE_ELEMENT_MATCHER_VAR),
-                var_name = CORE_ELEMENT_MATCHER_VAR,
-                optional_orphan_condition = match self.key.typ {
-                    ElementType::Node(_) => format!("WHERE NOT ({CORE_ELEMENT_MATCHER_VAR})--()"),
-                    _ => "".to_string(),
-                },
-            });
-            graph.run(delete_query).await?;
-
-            for node_label in &data_clear.dependent_node_labels {
-                let delete_node_query = neo4rs::query(&formatdoc! {"
-                        CALL {{
-                            MATCH (n:{node_label})
-                            WHERE NOT (n)--()
-                            DELETE n
-                        }} IN TRANSACTIONS
-                    ",
-                    node_label = node_label
-                });
-                graph.run(delete_node_query).await?;
-            }
-        }
-        Ok(())
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
+
+async fn clear_graph_element_data(
+    graph: &Graph,
+    key: &GraphElement,
+    is_dependent: bool,
+) -> Result<()> {
+    let var_name = CORE_ELEMENT_MATCHER_VAR;
+    let optional_orphan_condition = if is_dependent {
+        format!("WHERE NOT ({var_name})--()")
+    } else {
+        "".to_string()
+    };
+    let matcher = key.typ.matcher(CORE_ELEMENT_MATCHER_VAR);
+    let delete_query = neo4rs::query(&formatdoc! {"
+                    CALL {{
+                        MATCH {matcher} WITH {var_name} {optional_orphan_condition} DELETE {var_name}
+                    }} IN TRANSACTIONS
+                "});
+    graph.run(delete_query).await?;
+    Ok(())
+}
+
 /// Factory for Neo4j relationships
 pub struct Factory {
     graph_pool: Arc<GraphPool>,
@@ -1077,6 +1061,10 @@ impl StorageFactoryBase for Factory {
     type Spec = Spec;
     type DeclarationSpec = Declaration;
     type SetupState = SetupState;
+    type SetupStatus = (
+        GraphElementDataSetupStatus,
+        components::SetupStatus<SetupComponentOperator>,
+    );
     type Key = GraphElement;
     type ExportContext = ExportContext;
 
@@ -1255,24 +1243,19 @@ impl StorageFactoryBase for Factory {
         desired: Option<SetupState>,
         existing: CombinedState<SetupState>,
         auth_registry: &Arc<AuthRegistry>,
-    ) -> Result<impl ResourceSetupStatusCheck + 'static> {
+    ) -> Result<Self::SetupStatus> {
         let conn_spec = auth_registry.get::<ConnectionSpec>(&key.connection)?;
-        let base = SetupStatusCheck::new(
-            key,
-            self.graph_pool.clone(),
-            conn_spec.clone(),
-            desired.as_ref(),
-            &existing,
-        );
-        let comp = components::StatusCheck::create(
+        let data_status =
+            GraphElementDataSetupStatus::new(key, conn_spec.clone(), desired.as_ref(), &existing);
+        let components = components::SetupStatus::create(
             SetupComponentOperator {
                 graph_pool: self.graph_pool.clone(),
-                conn_spec: conn_spec.clone(),
+                conn_spec,
             },
             desired,
             existing,
         )?;
-        Ok(components::combine_status_checks(base, comp))
+        Ok((data_status, components))
     }
 
     fn check_state_compatibility(
@@ -1326,6 +1309,61 @@ impl StorageFactoryBase for Factory {
             .await
             .map_err(Into::<anyhow::Error>::into)?
         }
+        Ok(())
+    }
+
+    async fn apply_setup_changes(
+        &self,
+        changes: Vec<&'async_trait Self::SetupStatus>,
+    ) -> Result<()> {
+        let (data_statuses, components): (Vec<_>, Vec<_>) =
+            changes.into_iter().map(|c| (&c.0, &c.1)).unzip();
+
+        // Relationships first, then nodes, as relationships need to be deleted before nodes they referenced.
+        let mut relationship_types = IndexMap::<&GraphElement, &ConnectionSpec>::new();
+        let mut node_labels = IndexMap::<&GraphElement, &ConnectionSpec>::new();
+        let mut dependent_node_labels = IndexMap::<GraphElement, &ConnectionSpec>::new();
+        for data_status in data_statuses.iter() {
+            if let Some(data_clear) = &data_status.data_clear {
+                match &data_status.key.typ {
+                    ElementType::Relationship(_) => {
+                        relationship_types.insert(&data_status.key, &data_status.conn_spec);
+                        for label in &data_clear.dependent_node_labels {
+                            dependent_node_labels.insert(
+                                GraphElement {
+                                    connection: data_status.key.connection.clone(),
+                                    typ: ElementType::Node(label.clone()),
+                                },
+                                &data_status.conn_spec,
+                            );
+                        }
+                    }
+                    ElementType::Node(_) => {
+                        node_labels.insert(&data_status.key, &data_status.conn_spec);
+                    }
+                }
+            }
+        }
+
+        // Relationships have no dependency, so can be cleared first.
+        for (rel_type, conn_spec) in relationship_types.iter() {
+            let graph = self.graph_pool.get_graph(conn_spec).await?;
+            clear_graph_element_data(&graph, rel_type, false).await?;
+        }
+        // Clear standalone nodes, which is simpler than dependent nodes.
+        for (node_label, conn_spec) in node_labels.iter() {
+            let graph = self.graph_pool.get_graph(conn_spec).await?;
+            clear_graph_element_data(&graph, node_label, false).await?;
+        }
+        // Clear dependent nodes if they're not covered by standalone nodes.
+        for (node_label, conn_spec) in dependent_node_labels.iter() {
+            if !node_labels.contains_key(node_label) {
+                let graph = self.graph_pool.get_graph(conn_spec).await?;
+                clear_graph_element_data(&graph, node_label, true).await?;
+            }
+        }
+
+        apply_component_changes(components).await?;
         Ok(())
     }
 }
