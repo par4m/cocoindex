@@ -1,7 +1,6 @@
 from dotenv import load_dotenv
 import cocoindex
 import datetime
-import threading
 import os
 import requests
 import base64
@@ -9,7 +8,6 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from cocoindex.lib import main_fn
-import asyncio
 
 load_dotenv(override=True)
 
@@ -17,7 +15,7 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "gemma3"
 
 # 1. Extract caption from image using Ollama vision model
-@cocoindex.op.function()
+@cocoindex.op.function(cache=True, behavior_version=1)
 def get_image_caption(img_bytes: bytes) -> str:
     """
     Use Ollama's gemma3 model to extract a detailed caption from an image.
@@ -105,25 +103,8 @@ def startup_event():
         query_transform_flow=caption_to_embedding,
         default_similarity_metric=cocoindex.VectorSimilarityMetric.COSINE_SIMILARITY,
     )
-    # For live updating, pass the flow function directly
-    def run_updater():
-        async def updater_coroutine():
-            print("[LiveUpdater] Coroutine starting...")
-            try:
-                updater = await cocoindex.FlowLiveUpdater.create(image_object_embedding_flow)
-                print("[LiveUpdater] Updater created. Entering context...")
-                async with updater:
-                    print("[LiveUpdater] Running updater.wait()...")
-                    await updater.wait()
-                print("[LiveUpdater] Exited updater context.")
-            except Exception as e:
-                print(f"[LiveUpdater] Exception: {e}")
-        print("[LiveUpdater] Thread starting...")
-        asyncio.run(updater_coroutine())
-        print("[LiveUpdater] Thread finished.")
-    thread = threading.Thread(target=run_updater, daemon=True)
-    thread.start()
-    app.state.live_updater_thread = thread
+    app.state.live_updater = cocoindex.FlowLiveUpdater(image_object_embedding_flow)
+    app.state.live_updater.start()
 
 @app.get("/search")
 def search(q: str = Query(..., description="Search query"), limit: int = Query(5, description="Number of results")):
