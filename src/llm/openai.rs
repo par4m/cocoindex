@@ -41,7 +41,7 @@ impl LlmGenerationClient for Client {
     async fn generate<'req>(
         &self,
         request: super::LlmGenerateRequest<'req>,
-    ) -> Result<super::LlmGenerationResponse> {
+    ) -> Result<super::LlmGenerateResponse> {
         let mut messages = Vec::new();
 
         // Add system prompt if provided
@@ -100,11 +100,11 @@ impl LlmGenerationClient for Client {
         // If output_format is JsonSchema, try to parse as JSON
         if let Some(super::OutputFormat::JsonSchema { .. }) = output_format {
             match serde_json::from_str::<serde_json::Value>(&text) {
-                Ok(val) => Ok(super::LlmGenerationResponse::Json(val)),
-                Err(_) => Ok(super::LlmGenerationResponse::Text(text)),
+                Ok(val) => Ok(super::LlmGenerateResponse::Json(val)),
+                Err(_) => Ok(super::LlmGenerateResponse::Text(text)),
             }
         } else {
-            Ok(super::LlmGenerationResponse::Text(text))
+            Ok(super::LlmGenerateResponse::Text(text))
         }
     }
 

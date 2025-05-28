@@ -38,7 +38,7 @@ pub struct LlmGenerateRequest<'a> {
 }
 
 #[derive(Debug)]
-pub enum LlmGenerationResponse {
+pub enum LlmGenerateResponse {
     Json(serde_json::Value),
     Text(String),
 }
@@ -48,7 +48,7 @@ pub trait LlmGenerationClient: Send + Sync {
     async fn generate<'req>(
         &self,
         request: LlmGenerateRequest<'req>,
-    ) -> Result<LlmGenerationResponse>;
+    ) -> Result<LlmGenerateResponse>;
 
     fn json_schema_options(&self) -> ToJsonSchemaOptions;
 }
@@ -57,6 +57,7 @@ mod ollama;
 mod openai;
 mod gemini;
 mod anthropic;
+mod prompt_utils;
 
 pub async fn new_llm_generation_client(spec: LlmSpec) -> Result<Box<dyn LlmGenerationClient>> {
     let client = match spec.api_type {

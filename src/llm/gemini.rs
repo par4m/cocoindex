@@ -1,9 +1,10 @@
 use async_trait::async_trait;
-use crate::llm::{LlmGenerationClient, LlmSpec, LlmGenerateRequest, LlmGenerationResponse, ToJsonSchemaOptions, OutputFormat};
+use crate::llm::{LlmGenerationClient, LlmSpec, LlmGenerateRequest, LlmGenerateResponse, ToJsonSchemaOptions, OutputFormat};
 use anyhow::{Result, bail, Context};
 use serde_json::Value;
 use crate::api_bail;
 use urlencoding::encode;
+use crate::llm::prompt_utils::STRICT_JSON_PROMPT;
 
 pub struct Client {
     model: String,
@@ -48,7 +49,7 @@ impl LlmGenerationClient for Client {
     async fn generate<'req>(
         &self,
         request: LlmGenerateRequest<'req>,
-    ) -> Result<LlmGenerationResponse> {
+    ) -> Result<LlmGenerateResponse> {
         // Compose the prompt/messages
         let contents = vec![serde_json::json!({
             "role": "user",
@@ -57,10 +58,9 @@ impl LlmGenerationClient for Client {
 
         // Prepare payload
         let mut payload = serde_json::json!({ "contents": contents });
-        use crate::llm::prompt_utils::STRICT_JSON_PROMPT;
-if let Some(mut system) = request.system_prompt {
+        if let Some(mut system) = request.system_prompt {
     if matches!(request.output_format, Some(OutputFormat::JsonSchema { .. })) {
-        system = format!("{STRICT_JSON_PROMPT}\n\n{system}");
+        system = format!("{STRICT_JSON_PROMPT}\n\n{system}").into();
     }
     payload["systemInstruction"] = serde_json::json!({
         "parts": [ { "text": system } ]
@@ -103,11 +103,11 @@ if let Some(mut system) = request.system_prompt {
         // If output_format is JsonSchema, try to parse as JSON
         if let Some(OutputFormat::JsonSchema { .. }) = request.output_format {
             match serde_json::from_str::<serde_json::Value>(&text) {
-                Ok(val) => Ok(LlmGenerationResponse::Json(val)),
-                Err(_) => Ok(LlmGenerationResponse::Text(text)),
+                Ok(val) => Ok(LlmGenerateResponse::Json(val)),
+                Err(_) => Ok(LlmGenerateResponse::Text(text)),
             }
         } else {
-            Ok(LlmGenerationResponse::Text(text))
+            Ok(LlmGenerateResponse::Text(text))
         }
     }
 

@@ -1,6 +1,7 @@
 use super::LlmGenerationClient;
 use anyhow::Result;
 use async_trait::async_trait;
+use crate::llm::prompt_utils::STRICT_JSON_PROMPT;
 use schemars::schema::SchemaObject;
 use serde::{Deserialize, Serialize};
 
@@ -51,21 +52,10 @@ impl LlmGenerationClient for Client {
     async fn generate<'req>(
         &self,
         request: super::LlmGenerateRequest<'req>,
-    ) -> Result<super::LlmGenerationResponse> {
-        let req = OllamaRequest {
-            model: &self.model,
-            prompt: request.user_prompt.as_ref(),
-            format: request.output_format.as_ref().map(
-                |super::OutputFormat::JsonSchema { schema, .. }| {
-                    OllamaFormat::JsonSchema(schema.as_ref())
-                },
-            ),
-            system: request.system_prompt.as_ref().map(|s| s.as_ref()),
-            stream: Some(false),
-        };
+    ) -> Result<super::LlmGenerateResponse> {
         let mut system_prompt = request.system_prompt.unwrap_or_default();
         if matches!(request.output_format, Some(super::OutputFormat::JsonSchema { .. })) {
-            system_prompt = format!("{STRICT_JSON_PROMPT}\n\n{system_prompt}");
+            system_prompt = format!("{STRICT_JSON_PROMPT}\n\n{system_prompt}").into();
         }
         let req = OllamaRequest {
             model: &self.model,
@@ -75,7 +65,7 @@ impl LlmGenerationClient for Client {
                     OllamaFormat::JsonSchema(schema.as_ref())
                 },
             ),
-            system: Some(system_prompt.as_str()),
+            system: Some(&system_prompt),
             stream: Some(false),
         };
         let res = self
@@ -89,11 +79,11 @@ impl LlmGenerationClient for Client {
         // Check if output_format is JsonSchema, try to parse as JSON
         if let Some(super::OutputFormat::JsonSchema { .. }) = request.output_format {
             match serde_json::from_str::<serde_json::Value>(&json.response) {
-                Ok(val) => Ok(super::LlmGenerationResponse::Json(val)),
-                Err(_) => Ok(super::LlmGenerationResponse::Text(json.response)),
+                Ok(val) => Ok(super::LlmGenerateResponse::Json(val)),
+                Err(_) => Ok(super::LlmGenerateResponse::Text(json.response)),
             }
         } else {
-            Ok(super::LlmGenerationResponse::Text(json.response))
+            Ok(super::LlmGenerateResponse::Text(json.response))
         }
     }
 

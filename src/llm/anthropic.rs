@@ -1,6 +1,7 @@
 use async_trait::async_trait;
-use crate::llm::{LlmGenerationClient, LlmSpec, LlmGenerateRequest, LlmGenerationResponse, ToJsonSchemaOptions, OutputFormat};
+use crate::llm::{LlmGenerationClient, LlmSpec, LlmGenerateRequest, LlmGenerateResponse, ToJsonSchemaOptions, OutputFormat};
 use anyhow::{Result, bail, Context};
+use crate::llm::prompt_utils::STRICT_JSON_PROMPT;
 use serde_json::Value;
 
 use crate::api_bail;
@@ -31,7 +32,7 @@ impl LlmGenerationClient for Client {
     async fn generate<'req>(
         &self,
         request: LlmGenerateRequest<'req>,
-    ) -> Result<LlmGenerationResponse> {
+    ) -> Result<LlmGenerateResponse> {
         let messages = vec![serde_json::json!({
             "role": "user",
             "content": request.user_prompt
@@ -46,7 +47,7 @@ impl LlmGenerationClient for Client {
         // Add system prompt as top-level field if present (required)
         let mut system_prompt = request.system_prompt.unwrap_or_default();
         if matches!(request.output_format, Some(OutputFormat::JsonSchema { .. })) {
-            system_prompt = format!("{STRICT_JSON_PROMPT}\n\n{system_prompt}");
+            system_prompt = format!("{STRICT_JSON_PROMPT}\n\n{system_prompt}").into();
         }
         payload["system"] = serde_json::json!(system_prompt);
 
@@ -86,8 +87,8 @@ impl LlmGenerationClient for Client {
 
         // Try to parse as JSON
         match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(val) => Ok(LlmGenerationResponse::Json(val)),
-            Err(_) => Ok(LlmGenerationResponse::Text(text)),
+            Ok(val) => Ok(LlmGenerateResponse::Json(val)),
+            Err(_) => Ok(LlmGenerateResponse::Text(text)),
         }
     }
 
