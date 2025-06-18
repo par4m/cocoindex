@@ -10,6 +10,7 @@ class LlmApiType(Enum):
     GEMINI = "Gemini"
     ANTHROPIC = "Anthropic"
     LITELLM = "LiteLlm"
+    OPENROUTER = "OpenRouter"
 
 
 @dataclass
