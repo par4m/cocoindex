@@ -74,7 +74,7 @@ pub async fn new_llm_generation_client(spec: LlmSpec) -> Result<Box<dyn LlmGener
             Box::new(anthropic::Client::new(spec).await?) as Box<dyn LlmGenerationClient>
         }
         LlmApiType::LiteLlm => {
-            Box::new(litellm::Client::new(spec).await?) as Box<dyn LlmGenerationClient>
+            Box::new(litellm::Client::new_litellm(spec).await?) as Box<dyn LlmGenerationClient>
         }
     };
     Ok(client)
