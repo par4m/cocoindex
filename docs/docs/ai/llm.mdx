@@ -175,7 +175,7 @@ litellm --config config.yml
 
 ```python
 cocoindex.LlmSpec(
-    api_type=cocoindex.LlmApiType.LITELLM,
+    api_type=cocoindex.LlmApiType.LITE_LLM,
     model="deepseek-r1", 
     address="http://127.0.0.1:4000", # default url of LiteLLM
 )
@@ -198,7 +198,7 @@ A spec for OpenRouter looks like this:
 
 ```python
 cocoindex.LlmSpec(
-    api_type=cocoindex.LlmApiType.OPENROUTER,
+    api_type=cocoindex.LlmApiType.OPEN_ROUTER,
     model="deepseek/deepseek-r1:free",
 )
 ```
