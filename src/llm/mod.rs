@@ -82,8 +82,8 @@ mod litellm;
 mod ollama;
 mod openai;
 mod openrouter;
-mod voyage;
 mod vllm;
+mod voyage;
 
 pub async fn new_llm_generation_client(
     api_type: LlmApiType,
