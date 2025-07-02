@@ -134,6 +134,7 @@ pub fn new_llm_embedding_client(
         LlmApiType::Ollama
         | LlmApiType::OpenRouter
         | LlmApiType::LiteLlm
+        | LlmApiType::Vllm
         | LlmApiType::Anthropic => {
             api_bail!("Embedding is not supported for API type {:?}", api_type)
         }
