@@ -13,6 +13,7 @@ pub enum LlmApiType {
     LiteLlm,
     OpenRouter,
     Voyage,
+    Vllm,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +83,7 @@ mod ollama;
 mod openai;
 mod openrouter;
 mod voyage;
+mod vllm;
 
 pub async fn new_llm_generation_client(
     api_type: LlmApiType,
@@ -107,6 +109,9 @@ pub async fn new_llm_generation_client(
             as Box<dyn LlmGenerationClient>,
         LlmApiType::Voyage => {
             api_bail!("Voyage is not supported for generation")
+        }
+        LlmApiType::Vllm => {
+            Box::new(vllm::Client::new_vllm(address).await?) as Box<dyn LlmGenerationClient>
         }
     };
     Ok(client)
